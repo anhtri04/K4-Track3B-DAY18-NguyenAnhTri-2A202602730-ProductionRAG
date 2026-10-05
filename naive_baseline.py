@@ -16,10 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.m1_chunking import load_documents, chunk_basic
 from src.m2_search import DenseSearch
 from src.m4_eval import load_test_set, evaluate_ragas, save_report
-from config import NAIVE_COLLECTION
+from config import NAIVE_COLLECTION, get_llm_model, get_openai_client
 
 
-def main():
+def main(model: str | None = None, base_url: str | None = None):
     print("=" * 60)
     print("BASIC RAG BASELINE")
     print("(paragraph chunking + dense-only, no rerank, no enrichment)")
@@ -41,8 +41,8 @@ def main():
     from config import OPENAI_API_KEY
     llm_client = None
     if OPENAI_API_KEY:
-        from openai import OpenAI
-        llm_client = OpenAI()
+        llm_client = get_openai_client(base_url=base_url)
+    llm_model = get_llm_model(model)
 
     for i, item in enumerate(test_set):
         results = search.search(item["question"], top_k=3, collection=NAIVE_COLLECTION)
@@ -51,7 +51,7 @@ def main():
         if llm_client and contexts:
             try:
                 context_str = "\n\n".join(contexts)
-                resp = llm_client.chat.completions.create(model="gpt-4o-mini", messages=[
+                resp = llm_client.chat.completions.create(model=llm_model, messages=[
                     {"role": "system", "content": "Trả lời CHỈ dựa trên context. Nếu không có → nói 'Không tìm thấy.'"},
                     {"role": "user", "content": f"Context:\n{context_str}\n\nCâu hỏi: {item['question']}"},
                 ])
@@ -67,7 +67,8 @@ def main():
         ground_truths.append(item["ground_truth"])
         print(f"  [{i+1}/{len(test_set)}] {item['question'][:50]}...", flush=True)
 
-    results = evaluate_ragas(questions, answers, all_contexts, ground_truths)
+    results = evaluate_ragas(questions, answers, all_contexts, ground_truths,
+                             model=model, base_url=base_url)
     print("\nBASIC BASELINE SCORES")
     for m in ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]:
         print(f"  {m}: {results.get(m, 0):.4f}")

@@ -4,9 +4,11 @@ Lab 18: Production RAG Pipeline — Main Entry Point
 Chạy toàn bộ pipeline: naive baseline → production → so sánh → report.
 
 Usage:
-    python main.py
+    python main.py [--model MODEL_NAME] [--base-url BASE_URL]
+    # or via env: OPENAI_MODEL, OPENAI_BASE_URL (blank = official OpenAI)
 """
 
+import argparse
 import json
 import os
 import sys
@@ -18,10 +20,12 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
-def main():
+def main(model: str | None = None, base_url: str | None = None):
     print("=" * 60)
     print("LAB 18: PRODUCTION RAG PIPELINE")
     print("=" * 60)
+    from config import get_llm_base_url, get_llm_model
+    print(f"LLM model: {get_llm_model(model)} | base_url: {get_llm_base_url(base_url) or '(official OpenAI)'}")
     start = time.time()
 
     os.makedirs("reports", exist_ok=True)
@@ -30,14 +34,14 @@ def main():
     print("\n📌 STEP 1: Running Basic RAG Baseline...")
     print("-" * 40)
     from naive_baseline import main as run_baseline
-    run_baseline()
+    run_baseline(model=model, base_url=base_url)
 
     # Step 2: Production Pipeline
     print("\n📌 STEP 2: Running Production Pipeline...")
     print("-" * 40)
     from src.pipeline import build_pipeline, evaluate_pipeline
     search, reranker = build_pipeline()
-    prod_results = evaluate_pipeline(search, reranker)
+    prod_results = evaluate_pipeline(search, reranker, model=model, base_url=base_url)
 
     # Ensure reports are located in reports/
     for f in ["ragas_report.json", "naive_baseline_report.json"]:
@@ -74,4 +78,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", dest="model", default=None,
+                        help="Chat model name (default: $OPENAI_MODEL or gpt-4o-mini)")
+    parser.add_argument("--base-url", dest="base_url", default=None,
+                        help="OpenAI-compatible base URL (default: $OPENAI_BASE_URL; blank = official OpenAI)")
+    args = parser.parse_args()
+    main(model=args.model, base_url=args.base_url)

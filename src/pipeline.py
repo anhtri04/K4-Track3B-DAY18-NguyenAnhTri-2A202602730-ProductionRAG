@@ -15,7 +15,7 @@ from src.m2_search import HybridSearch
 from src.m3_rerank import CrossEncoderReranker
 from src.m4_eval import load_test_set, evaluate_ragas, failure_analysis, save_report
 from src.m5_enrichment import enrich_chunks
-from config import RERANK_TOP_K
+from config import RERANK_TOP_K, get_llm_model, get_openai_client
 
 
 def build_pipeline():
@@ -61,8 +61,20 @@ def build_pipeline():
     return search, reranker
 
 
-def run_query(query: str, search: HybridSearch, reranker: CrossEncoderReranker) -> tuple[str, list[str]]:
-    """Run single query through pipeline."""
+def run_query(
+    query: str,
+    search: HybridSearch,
+    reranker: CrossEncoderReranker,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> tuple[str, list[str]]:
+    """Run single query through pipeline.
+
+    Args:
+        model: override chat model name. None = use OPENAI_MODEL env.
+        base_url: override OpenAI-compatible endpoint. None = use
+            OPENAI_BASE_URL env; blank = fall back to official OpenAI.
+    """
     results = search.search(query)
     docs = [{"text": r.text, "score": r.score, "metadata": r.metadata} for r in results]
     reranked = reranker.rerank(query, docs, top_k=RERANK_TOP_K)
@@ -71,10 +83,9 @@ def run_query(query: str, search: HybridSearch, reranker: CrossEncoderReranker) 
     from config import OPENAI_API_KEY
     if OPENAI_API_KEY and contexts:
         try:
-            from openai import OpenAI
-            client = OpenAI()
+            client = get_openai_client(base_url=base_url)
             context_str = "\n\n".join(contexts)
-            resp = client.chat.completions.create(model="gpt-4o-mini", messages=[
+            resp = client.chat.completions.create(model=get_llm_model(model), messages=[
                 {"role": "system", "content": "Trả lời CHỈ dựa trên context. Nếu không có → nói 'Không tìm thấy.'"},
                 {"role": "user", "content": f"Context:\n{context_str}\n\nCâu hỏi: {query}"},
             ])
@@ -87,14 +98,16 @@ def run_query(query: str, search: HybridSearch, reranker: CrossEncoderReranker) 
     return answer, contexts
 
 
-def evaluate_pipeline(search: HybridSearch, reranker: CrossEncoderReranker):
+def evaluate_pipeline(search: HybridSearch, reranker: CrossEncoderReranker,
+                      model: str | None = None, base_url: str | None = None):
     """Run evaluation on test set."""
     test_set = load_test_set()
     print(f"\n[Eval] Running {len(test_set)} queries...", flush=True)
     questions, answers, all_contexts, ground_truths = [], [], [], []
 
     for i, item in enumerate(test_set):
-        answer, contexts = run_query(item["question"], search, reranker)
+        answer, contexts = run_query(item["question"], search, reranker,
+                                     model=model, base_url=base_url)
         questions.append(item["question"])
         answers.append(answer)
         all_contexts.append(contexts)
@@ -103,7 +116,8 @@ def evaluate_pipeline(search: HybridSearch, reranker: CrossEncoderReranker):
 
     t0 = time.time()
     print(f"\n[Eval] Running RAGAS (4 metrics × {len(test_set)} questions)...", flush=True)
-    results = evaluate_ragas(questions, answers, all_contexts, ground_truths)
+    results = evaluate_ragas(questions, answers, all_contexts, ground_truths,
+                             model=model, base_url=base_url)
     print(f"  ✓ RAGAS done ({time.time()-t0:.1f}s)", flush=True)
 
     print("\n" + "=" * 60)
